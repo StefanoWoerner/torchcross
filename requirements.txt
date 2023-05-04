@@ -1,0 +1,6 @@
+torch~=2.0.0
+numpy~=1.24.3
+torchopt~=0.7.0
+lightning~=2.0.2
+torchmetrics~=0.11.4
+omegaconf~=2.3.0
