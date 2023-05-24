@@ -4,7 +4,7 @@ from typing import Any
 
 from torch.utils.data import Dataset, IterableDataset, ChainDataset
 
-from ..base import TaskSource
+from ..task_source import TaskSource
 from ..task import Task
 
 

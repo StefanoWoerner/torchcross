@@ -1,215 +1,177 @@
-from typing import Any, Sequence, Tuple, Union
+from collections.abc import Callable, Sequence, Iterable
+from typing import Optional, Any
 
-import torchopt
-import hydra
-import lightning.pytorch as pl
 import torch
-import torchmetrics
-from omegaconf import DictConfig
+import torchopt
+from torch import Tensor
 from torch.optim import Optimizer
-import torch.nn.functional as F
-from torchmetrics.metric import Metric
 
-from torchcross.data.task import Task
+from .episodic import EpisodicLightningModule
+from ... import models
+from ...cd.activations import get_prob_func
+from ...cd.losses import get_loss_func
+from ...cd.metrics import get_accuracy_func, get_auroc_func
+from ...data import TaskDescription, Task
 
 
-class MAML(pl.LightningModule):
+class MAML(models.MAML, EpisodicLightningModule):
     def __init__(
         self,
-        net: torch.nn.Module,
-        optim_cfg,
-        hparams: DictConfig,
-        num_classes,
-        inductive=True,
-        *args,
-        **kwargs,
+        backbone: tuple[torch.nn.Module, int],
+        task_description: TaskDescription,
+        outer_optimizer: Callable[
+            [Iterable[Tensor] | Iterable[dict[str, Any]]], torch.optim.Optimizer
+        ],
+        inner_optimizer: Callable[[torch.nn.Module], torchopt.MetaOptimizer],
+        eval_inner_optimizer: Callable[
+            [Sequence[torch.nn.Parameter]], torchopt.Optimizer
+        ],
+        num_inner_steps: int,
+        eval_num_inner_steps: Optional[int] = None,
+        transductive: bool = True,
+        reset_head: Optional[models.maml.head_init_t] = None,
+        outer_lr_scheduler: Callable[[Optimizer], Any] | None = None,
     ) -> None:
-        super().__init__(*args, **kwargs)
-
-        self.cfg = hparams
-        self.save_hyperparameters(hparams)
-
-        self.net = net
-
-        self.optim_cfg = optim_cfg
-
-        self.inductive = inductive
-
-        self.automatic_optimization = False
-
-        self.train_support_accuracy = torchmetrics.Accuracy(
-            "multiclass", num_classes=num_classes
-        )
-        self.train_query_accuracy = torchmetrics.Accuracy(
-            "multiclass", num_classes=num_classes
-        )
-        self.val_support_accuracy = torchmetrics.Accuracy(
-            "multiclass", num_classes=num_classes
-        )
-        self.val_query_accuracy = torchmetrics.Accuracy(
-            "multiclass", num_classes=num_classes
-        )
-        self.test_support_accuracy = torchmetrics.Accuracy(
-            "multiclass", num_classes=num_classes
-        )
-        self.test_query_accuracy = torchmetrics.Accuracy(
-            "multiclass", num_classes=num_classes
+        super(MAML, self).__init__(
+            *backbone,
+            task_description,
+            inner_optimizer,
+            eval_inner_optimizer,
+            num_inner_steps,
+            eval_num_inner_steps,
+            transductive,
+            reset_head,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        self.outer_optimizer = outer_optimizer
+        self.outer_lr_scheduler = outer_lr_scheduler
+        metric_keys = [
+            "accuracy/meta{}/support",
+            "accuracy/meta{}/query",
+            "AUROC/meta{}/support",
+            "AUROC/meta{}/query",
+        ]
+        self.configure_metrics(metric_keys)
 
-    def outer_loop(
-        self, batch: Sequence[Task], train: bool, metrics: dict[str, Metric]
-    ):
-        inner_optimizer = self.optim_cfg.inner_optimizer(self.net)
-        # inner_optimizer = torchopt.MetaSGD(self.net, lr=1e-1)
+        self.accuracy_func = get_accuracy_func(
+            task_description.task_target, task_description.classes, self.device
+        )
+        self.auroc_func = get_auroc_func(
+            task_description.task_target, task_description.classes, self.device
+        )
 
-        mode = "metatrain" if train else "metaval"
+    def compute_metrics(self, task, support_pred, query_pred):
+        support_y = task.support[1]
+        query_y = task.query[1]
+        support_accuracy = self.accuracy_func(support_pred, support_y)
+        query_accuracy = self.accuracy_func(query_pred, query_y)
+        support_auroc = self.auroc_func(support_pred, support_y)
+        query_auroc = self.auroc_func(query_pred, query_y)
+        return support_accuracy, query_accuracy, support_auroc, query_auroc
 
-        support_losses = []
-        query_losses = []
-
+    def get_metrics_and_losses(
+        self, batch: Sequence[Task]
+    ) -> tuple[list[tuple[Tensor, ...]], list[Tensor], list[Tensor]]:
         net_state_dict = torchopt.extract_state_dict(
             self.net, by="reference", detach_buffers=True
         )
-        optim_state_dict = torchopt.extract_state_dict(inner_optimizer, by="reference")
-
+        metric_values = []
+        support_losses = []
+        query_losses = []
         for task in batch:
             support_x, support_y = task.support
             query_x, query_y = task.query
 
-            if support_x.shape[1] == 1:
-                support_x = support_x.repeat(1, 3, 1, 1)
-                query_x = query_x.repeat(1, 3, 1, 1)
+            loss_func = get_loss_func(task.task_target, task.classes, self.device)
+            pred_func = get_prob_func(task.task_target)
 
-            self.net.train()
-
-            for k in range(self.cfg.num_inner_steps):
-                support_logit = self.net(support_x)
-                loss = F.cross_entropy(support_logit, support_y)
-                inner_optimizer.step(loss)
-
-            if self.inductive:
-                self.net.eval()
-
+            support_logit, query_logit = self.episode(task, with_support_output=True)
+            query_losses.append(loss_func(query_logit, query_y))
             with torch.no_grad():
-                support_logit = self.net(support_x)
-                support_losses.append(F.cross_entropy(support_logit, support_y))
-                support_pred = torch.softmax(support_logit, dim=-1)
-                metrics["support_accuracy"](support_pred, support_y)
-
-            query_logit = self.net(query_x)
-            query_losses.append(F.cross_entropy(query_logit, query_y))
-            with torch.no_grad():
-                query_pred = torch.softmax(query_logit, dim=-1)
-                metrics["query_accuracy"](query_pred, query_y)
+                support_losses.append(loss_func(support_logit, support_y))
+                support_pred = pred_func(support_logit)
+                query_pred = pred_func(query_logit)
+                metric_values.append(
+                    self.compute_metrics(task, support_pred, query_pred)
+                )
 
             torchopt.recover_state_dict(self.net, net_state_dict)
-            torchopt.recover_state_dict(inner_optimizer, optim_state_dict)
+        return metric_values, support_losses, query_losses
 
-        support_loss = sum(support_losses) / len(support_losses)
-        query_loss = sum(query_losses) / len(query_losses)
-        self.log(f"loss/{mode}/support", support_loss, batch_size=len(batch))
-        self.log(f"loss/{mode}/query", query_loss, batch_size=len(batch), prog_bar=True)
 
-        return query_loss
-
-    def training_step(self, batch: Any, batch_idx: int):
-        outer_optimizer = self.optimizers()
-        outer_optimizer.zero_grad()
-
-        loss = self.outer_loop(
-            batch,
-            True,
-            {
-                "support_accuracy": self.train_support_accuracy,
-                "query_accuracy": self.train_query_accuracy,
-            },
-        )
-
-        self.manual_backward(loss)
-
-        # for pn, pp in self.named_parameters():
-        #     self.logger.experiment.add_histogram(
-        #         "parameters/" + pn, pp, self.global_step
-        #     )
-        # for pn, pp in self.named_parameters():
-        #     self.logger.experiment.add_histogram(
-        #         "gradients/" + pn, pp.grad, self.global_step
-        #     )
-
-        self.log(
-            "accuracy/metatrain/support_accuracy",
-            self.train_support_accuracy,
-            prog_bar=False,
-        )
-        self.log(
-            "accuracy/metatrain/query_accuracy",
-            self.train_query_accuracy,
-            prog_bar=True,
-        )
-
-        self.optimizers().step()
-
-    def validation_step(self, batch: Any, batch_idx: int):
-        torch.set_grad_enabled(True)
-        self.train()
-        self.outer_loop(
-            batch,
-            False,
-            {
-                "support_accuracy": self.val_support_accuracy,
-                "query_accuracy": self.val_query_accuracy,
-            },
-        )
-        torch.set_grad_enabled(False)
-
-        self.log(
-            "accuracy/metaval/support_accuracy",
-            self.val_support_accuracy,
-            prog_bar=False,
-        )
-        self.log(
-            "accuracy/metaval/query_accuracy",
-            self.val_query_accuracy,
-            prog_bar=True,
-        )
-
-    def test_step(self, batch: Any, batch_idx: int):
-        torch.set_grad_enabled(True)
-        self.train()
-        self.outer_loop(
-            batch,
-            False,
-            {
-                "support_accuracy": self.test_support_accuracy,
-                "query_accuracy": self.test_query_accuracy,
-            },
-        )
-        torch.set_grad_enabled(False)
-
-        self.log(
-            "accuracy/metaval/support_accuracy",
-            self.test_support_accuracy,
-            prog_bar=False,
-        )
-        self.log(
-            "accuracy/metaval/query_accuracy",
-            self.test_query_accuracy,
-            prog_bar=True,
-        )
-
-    def configure_optimizers(
+class CrossDomainMAML(models.CrossDomainMAML, EpisodicLightningModule):
+    def __init__(
         self,
-    ) -> Union[Optimizer, Tuple[Sequence[Optimizer], Sequence[Any]]]:
+        backbone: tuple[torch.nn.Module, int],
+        outer_optimizer: Callable[
+            [Iterable[Tensor] | Iterable[dict[str, Any]]], torch.optim.Optimizer
+        ],
+        inner_optimizer: Callable[[torch.nn.Module], torchopt.MetaOptimizer],
+        eval_inner_optimizer: Callable[
+            [Sequence[torch.nn.Parameter]], torchopt.Optimizer
+        ],
+        num_inner_steps: int,
+        eval_num_inner_steps: Optional[int] = None,
+        transductive: bool = True,
+        head_init: Optional[models.maml.head_init_t] = None,
+        outer_lr_scheduler: Callable[[Optimizer], Any] | None = None,
+    ) -> None:
+        super(CrossDomainMAML, self).__init__(
+            *backbone,
+            inner_optimizer,
+            eval_inner_optimizer,
+            num_inner_steps,
+            eval_num_inner_steps,
+            transductive,
+            head_init,
+        )
 
-        outer_optimizer = self.optim_cfg.outer_optimizer(params=self.parameters())
+        self.outer_optimizer = outer_optimizer
+        self.outer_lr_scheduler = outer_lr_scheduler
+        metric_keys = [
+            "accuracy/meta{}/support",
+            "accuracy/meta{}/query",
+            "AUROC/meta{}/support",
+            "AUROC/meta{}/query",
+        ]
+        self.configure_metrics(metric_keys)
 
-        if self.optim_cfg.use_lr_scheduler:
-            scheduler = hydra.utils.instantiate(
-                self.optim_cfg.lr_scheduler, optimizer=outer_optimizer
-            )
-            return [outer_optimizer], [scheduler]
+    def compute_metrics(self, task, support_pred, query_pred):
+        accuracy_func = get_accuracy_func(task.task_target, task.classes, self.device)
+        auroc_func = get_auroc_func(task.task_target, task.classes, self.device)
+        support_y = task.support[1]
+        query_y = task.query[1]
+        support_accuracy = accuracy_func(support_pred, support_y)
+        query_accuracy = accuracy_func(query_pred, query_y)
+        support_auroc = auroc_func(support_pred, support_y)
+        query_auroc = auroc_func(query_pred, query_y)
+        return support_accuracy, query_accuracy, support_auroc, query_auroc
 
-        return outer_optimizer
+    def get_metrics_and_losses(
+        self, batch: Sequence[Task]
+    ) -> tuple[list[tuple[Tensor, ...]], list[Tensor], list[Tensor]]:
+        backbone_state_dict = torchopt.extract_state_dict(
+            self.backbone, by="reference", detach_buffers=True
+        )
+        metric_values = []
+        support_losses = []
+        query_losses = []
+        for task in batch:
+            support_x, support_y = task.support
+            query_x, query_y = task.query
+
+            loss_func = get_loss_func(task.task_target, task.classes, self.device)
+            pred_func = get_prob_func(task.task_target)
+
+            support_logit, query_logit = self.episode(task, with_support_output=True)
+            query_losses.append(loss_func(query_logit, query_y))
+            with torch.no_grad():
+                support_losses.append(loss_func(support_logit, support_y))
+                support_pred = pred_func(support_logit)
+                query_pred = pred_func(query_logit)
+                metric_values.append(
+                    self.compute_metrics(task, support_pred, query_pred)
+                )
+
+            torchopt.recover_state_dict(self.backbone, backbone_state_dict)
+        return metric_values, support_losses, query_losses

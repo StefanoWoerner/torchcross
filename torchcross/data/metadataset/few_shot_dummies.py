@@ -2,7 +2,7 @@ import torch
 
 from torchcross.utils.collate_fn import identity
 from . import MetaDataset
-from ..base import TaskSource
+from ..task_source import TaskSource
 from ..task import TaskTarget, Task
 
 

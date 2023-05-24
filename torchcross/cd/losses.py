@@ -5,10 +5,23 @@ import torch.nn.functional as F
 
 from torchcross.data.task import TaskTarget
 
+__all__ = ["get_loss_func"]
 
 def get_loss_func(
     task_target: TaskTarget, classes: dict[int, str], device: torch.device = None
 ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
+    """Get the loss function for a given task target and classes.
+
+    Args:
+        task_target: The task target.
+        classes: The classes for the task.
+        device: The device to create tensors needed for the loss function
+            on.
+
+    Returns:
+        A loss function that takes logits and labels and returns a loss
+        tensor.
+    """
     match task_target:
         case TaskTarget.MULTICLASS_CLASSIFICATION:
             return F.cross_entropy

@@ -10,14 +10,18 @@ from torchcross.data.task import TaskTarget
 def get_accuracy_func(
     task_target: TaskTarget, classes: dict[int, str], device: torch.device = None
 ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
-    """
-    Get the accuracy metric function for a given task target.
-    :param task_target: the task target
-    :param classes: a dictionary mapping class indices to class names
-    :param device: a torch device (needed for ordinal regression metric)
-    :return: a function expecting two tensors, the first being the
-    predictions and the second being the ground truth, and returning
-    the accuracy
+    """Get the accuracy function for a given task target and classes.
+
+    Args:
+        task_target: The task target.
+        classes: The classes for the task.
+        device: The device to create tensors needed for the accuracy
+            function on.
+
+    Returns:
+        A torchmetrics functional metric or a function wrapping a
+        torchmetrics functional metric for the given task target and
+        classes.
     """
     match task_target:
         case TaskTarget.MULTICLASS_CLASSIFICATION:
@@ -53,15 +57,19 @@ def get_accuracy_func(
 def get_auroc_func(
     task_target: TaskTarget, classes: dict[int, str], device: torch.device = None
 ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
-    """
-    Get the area under the ROC curve metric function for a given task
-    target.
-    :param task_target: the task target
-    :param classes: a dictionary mapping class indices to class names
-    :param device: a torch device (needed for ordinal regression metric)
-    :return: a function expecting two tensors, the first being the
-    predictions and the second being the ground truth, and returning
-    the area under the ROC curve
+    """Get the area under the ROC curve metric function for a given task
+    target and classes.
+
+    Args:
+        task_target: The task target.
+        classes: The classes for the task.
+        device: The device to create tensors needed for the metric
+            function on.
+
+    Returns:
+        A torchmetrics functional metric or a function wrapping a
+        torchmetrics functional metric for the given task target and
+        classes.
     """
     match task_target:
         case TaskTarget.MULTICLASS_CLASSIFICATION:

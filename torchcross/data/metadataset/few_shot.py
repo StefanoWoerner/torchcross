@@ -3,6 +3,7 @@ import random
 from builtins import NotImplementedError
 from collections.abc import Sequence, Iterable, Iterator, Callable
 from functools import partial
+from typing import TypeVar
 
 import numpy as np
 import torch
@@ -11,20 +12,25 @@ from torch.utils.data import SubsetRandomSampler
 from torchcross.utils.collate_fn import identity
 from . import MetaDataset
 from .base import IterableMetaDataset
-from ..base import TaskSource
+from ..task_source import TaskSource
 from ..task import TaskTarget, Task
 
 
-def get_indices(labels, classes, task_target):
+LT = TypeVar("LT", bound=torch.Tensor | np.ndarray | Sequence[int])
+
+
+def get_indices(
+    labels: LT, classes, task_target: TaskTarget
+) -> tuple[dict[int, LT], dict[int, LT]]:
     if isinstance(labels, np.ndarray):
 
         def ind_func(x):
-            return np.nonzero(x)[0]  # .tolist()
+            return np.nonzero(x)[0]
 
     elif isinstance(labels, torch.Tensor):
 
         def ind_func(x):
-            return torch.nonzero(x).flatten()  # .tolist()
+            return torch.nonzero(x).flatten()
 
     else:
         raise ValueError("Unsupported label data type")
@@ -38,6 +44,9 @@ def get_indices(labels, classes, task_target):
     elif task_target is TaskTarget.BINARY_CLASSIFICATION:
         pos_indices = {1: ind_func(labels)}
         neg_indices = {1: ind_func(labels - 1)}
+    elif task_target is TaskTarget.ORDINAL_REGRESSION:
+        pos_indices = {c: ind_func(labels == c) for c in classes}
+        neg_indices = {c: ind_func(labels != c) for c in classes}
     else:
         raise NotImplementedError(f"Task target {task_target} not yet implemented")
     return pos_indices, neg_indices
@@ -426,232 +435,3 @@ class SubTaskRandomFewShotMetaDataset(FewShotMetaDataset):
                 self.n_support_samples_per_class_max,
             )
         self.used_classes = self.original_used_classes
-
-
-class MultiLabelFewShotMetaDataset(IterableMetaDataset):
-    def __init__(
-        self,
-        dataset: TaskSource,
-        collate_fn=None,
-        sampler: Callable[[Sequence[int]], Iterable[int]] = SubsetRandomSampler,
-        n_support_samples_per_class: int = 5,
-        n_query_samples_per_class: int = 20,
-        filter_classes_min_samples: int = 50,
-    ) -> None:
-        super().__init__()
-        self.dataset = dataset
-        self.task_target = dataset.task_target
-
-        self.pos_indices, self.neg_indices = get_indices(
-            self.dataset.labels, self.dataset.classes, self.task_target
-        )
-
-        self.used_classes = list(self.dataset.classes.keys())
-        if self.task_target is TaskTarget.BINARY_CLASSIFICATION:
-            self.used_classes = [1]
-        if filter_classes_min_samples > 0:
-            self.used_classes = [
-                c
-                for c in self.used_classes
-                if len(self.pos_indices[c]) >= filter_classes_min_samples
-            ]
-
-            if self.task_target in (
-                TaskTarget.BINARY_CLASSIFICATION,
-                TaskTarget.MULTILABEL_CLASSIFICATION,
-            ):
-                self.used_classes = [
-                    c
-                    for c in self.used_classes
-                    if len(self.neg_indices[c]) >= filter_classes_min_samples
-                ]
-        if (
-            len(self.used_classes) < 2
-            and self.task_target is not TaskTarget.BINARY_CLASSIFICATION
-        ):
-            message = "FewShotMetaDataset requires at least 2 classes"
-            if filter_classes_min_samples > 0:
-                message += f" with at least {filter_classes_min_samples} samples each"
-            message += f"for {self.task_target}."
-            raise ValueError(message)
-
-        self.collate_fn = collate_fn if collate_fn else identity
-        self.samplers = {c: sampler(self.pos_indices[c]) for c in self.used_classes}
-        self.n_support_samples_per_class = n_support_samples_per_class
-        self.n_query_samples_per_class = n_query_samples_per_class
-
-    def __len__(self) -> int:
-        return min(len(s) for s in self.samplers.values()) // (
-            self.n_support_samples_per_class + self.n_query_samples_per_class
-        )
-
-    def __iter__(self) -> Iterator[Task]:
-        sampler_iters = [iter(s) for c, s in self.samplers.items()]
-
-        def _get_multiclass_shot(n_shot_per_class):
-            sample = [
-                (i, j)
-                for j, s in enumerate(sampler_iters)
-                for i in [next(s) for _ in range(n_shot_per_class)]
-            ]
-            return [(self.dataset[i][0], torch.tensor(j)) for i, j in sample]
-
-        while True:
-            try:
-                support = _get_multiclass_shot(self.n_support_samples_per_class)
-                query = _get_multiclass_shot(self.n_query_samples_per_class)
-                support = self.collate_fn(support)
-                query = self.collate_fn(query)
-                class_dict = {
-                    ci: self.dataset.classes[c]
-                    for ci, c in enumerate(self.used_classes)
-                }
-                yield Task(support, query, self.task_target, class_dict)
-            except StopIteration:
-                break
-
-
-class SubtaskMetaDataset(MetaDataset):
-    def __init__(
-        self,
-        dataset: TaskSource,
-        collate_fn=None,
-        n_shot_provider: Iterator[Sequence[int]] = None,
-    ) -> None:
-        super().__init__()
-        self.dataset = dataset
-        self.task_target = dataset.task_target
-
-        self.indices = None
-
-        if self.task_target is TaskTarget.MULTICLASS_CLASSIFICATION:
-            self.indices = {
-                c: [i for i, l in enumerate(self.dataset.labels) if l == c]
-                for c in self.dataset.classes
-            }
-        elif self.task_target is TaskTarget.MULTILABEL_CLASSIFICATION:
-            self.indices = {
-                c: [i for i, l in enumerate(self.dataset.labels) if l[c]]
-                for c in self.dataset.classes
-            }
-            self.anti_indices = {
-                c: [i for i, l in enumerate(self.dataset.labels) if not l[c]]
-                for c in self.dataset.classes
-            }
-        else:
-            raise NotImplementedError(
-                f"Task target {self.task_target} not yet implemented"
-            )
-
-        self.collate_fn = collate_fn if collate_fn else identity
-
-        self.n_shot_provider = (
-            n_shot_provider if n_shot_provider else itertools.repeat((5, None))
-        )
-
-    def sample_multiclass_shot(
-        self,
-        selected_classes: Sequence,
-        n_shot_per_class: int | None = None,
-        n_shot_total: int | None = None,
-    ):
-        if n_shot_per_class is None:
-            if n_shot_total is None:
-                raise ValueError(
-                    "n_shot_per_class and n_shot_total can not both be None."
-                )
-            population = [
-                (i, j) for j, c in enumerate(selected_classes) for i in self.indices[c]
-            ]
-            sample = random.sample(population, n_shot_total)
-        else:
-            if n_shot_total is not None:
-                raise ValueError(
-                    "n_shot_per_class and n_shot_total can not both be set."
-                )
-            sample = [
-                (i, j)
-                for j, c in enumerate(selected_classes)
-                for i in random.sample(self.indices[c], n_shot_per_class)
-            ]
-        return [(self.dataset[i][0], torch.tensor(j)) for i, j in sample]
-
-    def sample_multilabel_shot(
-        self,
-        selected_classes: Sequence,
-        n_shot_per_class: int | None = None,
-        n_shot_total: int | None = None,
-    ):
-        if n_shot_per_class is None:
-            if n_shot_total is None:
-                raise ValueError(
-                    "n_shot_per_class and n_shot_total can not both be None."
-                )
-
-            criteria_fulfilled = False
-            while not criteria_fulfilled:
-                candidate = random.sample(range(len(self.dataset.labels)), n_shot_total)
-                candidate_labels = self.dataset.labels[candidate]
-                label_sums = sum(candidate_labels)
-                criteria_fulfilled = all(0 < x < n_shot_total for x in label_sums)
-
-            sample = [
-                (i, [self.dataset.labels[i][c] for c in selected_classes])
-                for i in candidate
-            ]
-        else:
-            if n_shot_total is not None:
-                raise ValueError(
-                    "n_shot_per_class and n_shot_total can not both be set."
-                )
-
-            usable_indices = set(range(len(self.dataset.labels)))
-            positive_sums = np.zeros(len(self.dataset.classes))
-            negative_sums = np.zeros(len(self.dataset.classes))
-            candidate = []
-            criteria_fulfilled = False
-            while not criteria_fulfilled:
-                i = random.sample(usable_indices, 1)
-                positive_sums = positive_sums + self.dataset.labels[i]
-                negative_sums = negative_sums + 1 - self.dataset.labels[i]
-                for c in selected_classes:
-                    if positive_sums[c] == n_shot_per_class:
-                        usable_indices.difference_update(self.indices[c])
-                    if negative_sums[c] == n_shot_per_class:
-                        usable_indices.difference_update(self.anti_indices[c])
-                usable_indices.remove(i)
-                candidate = candidate + i
-
-            sample = [
-                (i, [self.dataset.labels[i][c] for c in selected_classes])
-                for i in candidate
-            ]
-
-        return [(self.dataset[i][0], torch.tensor(j)) for i, j in sample]
-
-    def __getitem__(self, index: Sequence) -> Task:
-        if self.task_target is TaskTarget.MULTICLASS_CLASSIFICATION:
-            support = self.collate_fn(
-                self.sample_multiclass_shot(index, *next(self.n_shot_provider))
-            )
-            query = self.collate_fn(
-                self.sample_multiclass_shot(index, *next(self.n_shot_provider))
-            )
-        elif self.task_target is TaskTarget.MULTILABEL_CLASSIFICATION:
-            support = self.collate_fn(
-                self.sample_multilabel_shot(index, *next(self.n_shot_provider))
-            )
-            query = self.collate_fn(
-                self.sample_multilabel_shot(index, *next(self.n_shot_provider))
-            )
-        else:
-            raise NotImplementedError(
-                f"Task target {self.task_target} not yet implemented"
-            )
-
-        return Task(
-            support,
-            query,
-            self.task_target,
-            {k: self.dataset.classes[k] for k in index},
-        )
