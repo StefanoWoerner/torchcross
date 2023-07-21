@@ -108,33 +108,6 @@ class BatchedTaskSource(TaskSource, IterableDataset):
         return len(self.batch_sampler)
 
 
-class RandomChainTaskSource(TaskSource, IterableDataset):
-    def __init__(self, task_sources: list[BatchedTaskSource]):
-        self.task_sources = task_sources
-
-    def __iter__(self):
-        iterators = [iter(ts) for ts in self.task_sources]
-        # Calculate the weights of each iterator based on the batched task source length
-        weights = [len(ts) for ts in self.task_sources]
-        task_descriptions = [
-            TaskDescription(ts.task_target, ts.classes, ts.task_identifier)
-            for ts in self.task_sources
-        ]
-        while iterators:
-            # Randomly select an iterator with a probability proportional to its weight
-            i = random.choices(range(len(self.task_sources)), weights=weights)[0]
-            selected_iterator = iterators[i]
-            try:
-                # Return one element from the selected iterator
-                yield next(selected_iterator), task_descriptions[i]
-            except StopIteration:
-                # The iterator is exhausted, so remove it from the list of iterators
-                iterators.remove(selected_iterator)
-
-    def __len__(self):
-        return sum(len(ts) for ts in self.task_sources)
-
-
 class ConcatTaskSource(TaskSource, ConcatDataset):
     datasets: list[TaskSource]
 

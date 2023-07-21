@@ -6,6 +6,7 @@ from .task_source import (
     RandomChainTaskSource,
     ConcatTaskSource,
 )
+from .dataset import InterleaveDataset, RandomInterleaveDataset
 
 __all__ = [
     "Task",
@@ -14,6 +15,7 @@ __all__ = [
     "TaskSource",
     "WrapTaskSource",
     "BatchedTaskSource",
-    "RandomChainTaskSource",
     "ConcatTaskSource",
+    "InterleaveDataset",
+    "RandomInterleaveDataset",
 ]
