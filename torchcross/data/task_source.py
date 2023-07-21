@@ -21,7 +21,6 @@ __all__ = [
     "TaskSource",
     "WrapTaskSource",
     "BatchedTaskSource",
-    "RandomChainTaskSource",
     "ConcatTaskSource",
 ]
 

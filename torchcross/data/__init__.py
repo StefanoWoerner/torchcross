@@ -3,7 +3,6 @@ from .task_source import (
     TaskSource,
     WrapTaskSource,
     BatchedTaskSource,
-    RandomChainTaskSource,
     ConcatTaskSource,
 )
 from .dataset import InterleaveDataset, RandomInterleaveDataset
