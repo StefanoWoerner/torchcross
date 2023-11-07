@@ -14,10 +14,6 @@ class CollectionMetaDataset(MetaDataset):
         ...
 
     @overload
-    def __init__(self, *tasks: Task) -> None:
-        ...
-
-    @overload
     def __init__(
         self,
         support_datasets: Iterable[Dataset],
@@ -39,17 +35,11 @@ class CollectionMetaDataset(MetaDataset):
             )
             assert len(support_datasets) > 0
             self.tasks = [
-                Task(
-                    support,
-                    query,
-                    task_description.task_target,
-                    task_description.classes,
-                )
+                Task(support, query, task_description)
                 for support, query, task_description in zip(
                     support_datasets, query_datasets, task_descriptions
                 )
             ]
-
         else:
             raise TypeError(f"Expected 1 or 3 positional arguments, got {len(args)}")
 

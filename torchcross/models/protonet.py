@@ -5,7 +5,7 @@ import torch
 from torch import nn, Tensor
 
 from torchcross.cd.activations import get_log_prob_func
-from torchcross.data.task import Task, TaskTarget, TaskDescription
+from torchcross.data.task import Task, TaskTarget
 from torchcross.models import CrossDomainModel
 from torchcross.models.episodic import EpisodicModel
 from torchcross.utils.layers import Expand
@@ -42,7 +42,7 @@ class ProtoNet(EpisodicModel):
         query_x = task.query[0]
         query_features = self.backbone(query_x)
         dist = self.compute_distance(query_features, prototypes)
-        logits_func = get_log_prob_func(task.task_target)
+        logits_func = get_log_prob_func(task.description.task_target)
         query_logits = logits_func(-dist)
         if neg_prototypes is not None:
             neg_dist = self.compute_distance(query_features, neg_prototypes)
@@ -53,8 +53,8 @@ class ProtoNet(EpisodicModel):
     def get_prototypes(self, task: Task) -> tuple[Tensor, Tensor]:
         support_x, support_y = task.support
         support_features = self.backbone(support_x)
-        task_target = task.task_target
-        classes = task.classes
+        task_target = task.description.task_target
+        classes = task.description.classes
 
         if task_target is TaskTarget.MULTICLASS_CLASSIFICATION:
             prototypes = torch.stack(

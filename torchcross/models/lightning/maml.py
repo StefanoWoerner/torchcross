@@ -82,8 +82,10 @@ class MAML(models.MAML, EpisodicLightningModule):
             support_x, support_y = task.support
             query_x, query_y = task.query
 
-            loss_func = get_loss_func(task.task_target, task.classes, self.device)
-            pred_func = get_prob_func(task.task_target)
+            loss_func = get_loss_func(
+                task.description.task_target, task.description.classes, self.device
+            )
+            pred_func = get_prob_func(task.description.task_target)
 
             support_logit, query_logit = self.episode(task, with_support_output=True)
             query_losses.append(loss_func(query_logit, query_y))
@@ -137,8 +139,12 @@ class CrossDomainMAML(models.CrossDomainMAML, EpisodicLightningModule):
         self.configure_metrics(metric_keys)
 
     def compute_metrics(self, task, support_pred, query_pred):
-        accuracy_func = get_accuracy_func(task.task_target, task.classes, self.device)
-        auroc_func = get_auroc_func(task.task_target, task.classes, self.device)
+        accuracy_func = get_accuracy_func(
+            task.description.task_target, task.description.classes, self.device
+        )
+        auroc_func = get_auroc_func(
+            task.description.task_target, task.description.classes, self.device
+        )
         support_y = task.support[1]
         query_y = task.query[1]
         support_accuracy = accuracy_func(support_pred, support_y)
@@ -160,8 +166,10 @@ class CrossDomainMAML(models.CrossDomainMAML, EpisodicLightningModule):
             support_x, support_y = task.support
             query_x, query_y = task.query
 
-            loss_func = get_loss_func(task.task_target, task.classes, self.device)
-            pred_func = get_prob_func(task.task_target)
+            loss_func = get_loss_func(
+                task.description.task_target, task.description.classes, self.device
+            )
+            pred_func = get_prob_func(task.description.task_target)
 
             support_logit, query_logit = self.episode(task, with_support_output=True)
             query_losses.append(loss_func(query_logit, query_y))

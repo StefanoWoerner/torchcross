@@ -1,21 +1,21 @@
 import pytest
 import torch
-from torch.utils.data import Dataset, TensorDataset
+
+from torchcross.data import TaskSource, Task, TaskTarget, TaskDescription
 from torchcross.data.metadataset import (
     MetaDataset,
     MetaConcatDataset,
     IterableMetaDataset,
     MetaChainDataset,
 )
-from torchcross.data import TaskSource, Task, TaskTarget
 
 
 class DummyTaskSource(TaskSource):
     data = torch.rand(10)
     labels = torch.randint(0, 2, (10,))
-    classes = {0: "a", 1: "b"}
-    task_target = TaskTarget.MULTICLASS_CLASSIFICATION
-    task_identifier = "test"
+    task_description = TaskDescription(
+        TaskTarget.MULTICLASS_CLASSIFICATION, {0: "a", 1: "b"}, task_identifier="test"
+    )
 
     def __getitem__(self, index):
         return self.data[index], self.labels[index]
@@ -28,8 +28,7 @@ class DummyMetaDataset(MetaDataset):
         return Task(
             self.task_source[index],
             self.task_source[-index],
-            self.task_source.task_target,
-            self.task_source.classes,
+            self.task_source.task_description,
         )
 
 
@@ -41,8 +40,7 @@ class DummyIterableMetaDataset(IterableMetaDataset):
             yield Task(
                 self.task_source[i],
                 self.task_source[-i],
-                self.task_source.task_target,
-                self.task_source.classes,
+                self.task_source.task_description,
             )
 
 

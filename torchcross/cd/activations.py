@@ -8,6 +8,7 @@ from torchcross.data.task import TaskTarget
 
 __all__ = ["get_prob_func", "get_log_prob_func"]
 
+
 def get_prob_func(
     task_target: TaskTarget,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
@@ -30,6 +31,7 @@ def get_prob_func(
             return lambda x: x
         case target:
             raise NotImplementedError(f"Task target {target} not yet implemented")
+
 
 def get_log_prob_func(
     task_target: TaskTarget,

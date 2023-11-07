@@ -227,9 +227,11 @@ class CrossDomainMAML(EpisodicModel, CrossDomainModel):
         support_x, support_y = task.support
         query_x = task.query[0]
 
-        net = self.get_net(TaskDescription(task.task_target, task.classes))
+        net = self.get_net(task.description)
         inner_loss_func = get_loss_func(
-            task.task_target, task.classes, self.device_dummy.device
+            task.description.task_target,
+            task.description.classes,
+            self.device_dummy.device,
         )
         net.train()
         if self.training:

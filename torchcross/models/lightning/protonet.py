@@ -39,8 +39,12 @@ class ProtoNet(models.ProtoNet, EpisodicLightningModule):
         self.configure_metrics(metric_keys)
 
     def compute_metrics(self, task, query_pred):
-        accuracy_func = get_accuracy_func(task.task_target, task.classes, self.device)
-        auroc_func = get_auroc_func(task.task_target, task.classes, self.device)
+        accuracy_func = get_accuracy_func(
+            task.description.task_target, task.description.classes, self.device
+        )
+        auroc_func = get_auroc_func(
+            task.description.task_target, task.description.classes, self.device
+        )
         query_y = task.query[1]
         query_accuracy = accuracy_func(query_pred, query_y)
         query_auroc = auroc_func(query_pred, query_y)
@@ -55,8 +59,10 @@ class ProtoNet(models.ProtoNet, EpisodicLightningModule):
             support_x, support_y = task.support
             query_x, query_y = task.query
 
-            loss_func = get_loss_func(task.task_target, task.classes, self.device)
-            pred_func = get_prob_func(task.task_target)
+            loss_func = get_loss_func(
+                task.description.task_target, task.description.classes, self.device
+            )
+            pred_func = get_prob_func(task.description.task_target)
 
             query_logit = self.episode(task)
             query_losses.append(loss_func(query_logit, query_y))

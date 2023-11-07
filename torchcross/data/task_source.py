@@ -1,5 +1,4 @@
 import bisect
-import random
 from abc import ABC
 from collections.abc import Callable, Sequence
 
@@ -30,10 +29,8 @@ from ..utils import to_numpy
 class TaskSource(Dataset, ABC):
     """A dataset that can be used as a source to generate tasks."""
 
-    task_target: TaskTarget
+    task_description: TaskDescription
     labels: np.ndarray | torch.Tensor | Sequence
-    classes: dict[int, str]
-    task_identifier: str = ""
 
 
 class WrapTaskSource(TaskSource):
@@ -46,11 +43,12 @@ class WrapTaskSource(TaskSource):
         classes: dict[int, str],
         label_fn: Callable[[Dataset], np.ndarray | torch.Tensor | Sequence] = None,
         task_identifier: str = "",
+        domain_identifier: str = "",
     ):
         self.dataset = dataset
-        self.task_target = task_target
-        self.classes = classes
-        self.task_identifier = task_identifier
+        self.task_description = TaskDescription(
+            task_target, classes, task_identifier, domain_identifier
+        )
 
         def default_label_fn(ds: Dataset):
             return np.stack([to_numpy(item[1]) for item in ds])
@@ -76,14 +74,8 @@ class BatchedTaskSource(TaskSource, IterableDataset):
         with_task_description: bool = False,
     ):
         self.task_source = task_source
-        self.task_target = task_source.task_target
-        self.classes = task_source.classes
-        self.task_identifier = task_source.task_identifier
+        self.task_description = task_source.task_description
         self.with_task_description = with_task_description
-        if self.with_task_description:
-            self.task_description = TaskDescription(
-                self.task_target, self.classes, self.task_identifier
-            )
 
         sampler = (
             RandomSampler(self.task_source)
@@ -124,11 +116,7 @@ class ConcatTaskSource(TaskSource, ConcatDataset):
             sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return (
             self.datasets[dataset_idx][sample_idx],
-            TaskDescription(
-                self.datasets[dataset_idx].task_target,
-                self.datasets[dataset_idx].classes,
-                self.datasets[dataset_idx].task_identifier,
-            ),
+            self.datasets[dataset_idx].task_description,
         )
 
     def __len__(self):
@@ -139,9 +127,7 @@ class SubsetTaskSource(TaskSource):
     def __init__(self, task_source: TaskSource, indices: Sequence[int]):
         self.task_source = task_source
         self.indices = indices
-        self.task_target = task_source.task_target
-        self.classes = task_source.classes
-        self.task_identifier = task_source.task_identifier
+        self.task_description = task_source.task_description
         self.labels = task_source.labels[indices]
 
     def __getitem__(self, idx):

@@ -1,20 +1,15 @@
-import itertools
 import random
-from builtins import NotImplementedError
-from collections.abc import Sequence, Iterable, Iterator, Callable
+from collections.abc import Sequence, Iterator
 from functools import partial
 from typing import TypeVar
 
 import numpy as np
 import torch
-from torch.utils.data import SubsetRandomSampler
 
 from torchcross.utils.collate_fn import identity
-from . import MetaDataset
 from .base import IterableMetaDataset
+from ..task import TaskTarget, Task, TaskDescription
 from ..task_source import TaskSource
-from ..task import TaskTarget, Task
-
 
 LT = TypeVar("LT", bound=torch.Tensor | np.ndarray | Sequence[int])
 
@@ -53,10 +48,10 @@ def get_indices(
 
 
 def multiclass_few_shot_sample(
-    pos_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
+    pos_indices: dict[int, LT],
     n_shot: int,
     selected_classes: Sequence[int] | dict[int, str],
-):
+) -> np.ndarray:
     sample = np.array([], dtype=np.int64)
     # Sample n_shot positive examples for each class
     for c in selected_classes:
@@ -66,10 +61,8 @@ def multiclass_few_shot_sample(
 
 
 def binary_few_shot_sample(
-    pos_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
-    neg_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
-    n_shot: int,
-):
+    pos_indices: dict[int, LT], neg_indices: dict[int, LT], n_shot: int
+) -> np.ndarray:
     pos_sample = np.random.choice(pos_indices[1], size=n_shot, replace=False)
     neg_sample = np.random.choice(neg_indices[1], size=n_shot, replace=False)
     return np.concatenate([pos_sample, neg_sample])
@@ -77,8 +70,8 @@ def binary_few_shot_sample(
 
 def multilabel_few_shot_sample(
     labels: np.ndarray | torch.Tensor,
-    pos_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
-    neg_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
+    pos_indices: dict[int, LT],
+    neg_indices: dict[int, LT],
     n_shot: int,
     selected_classes: Sequence[int] | dict[int, str],
 ) -> np.ndarray:
@@ -138,10 +131,10 @@ def multilabel_few_shot_sample(
 
 
 def remove_indices(
-    pos_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
-    neg_indices: dict[int, np.ndarray | torch.Tensor | Sequence[int]],
-    sample: np.ndarray | torch.Tensor | Sequence[int],
-):
+    pos_indices: dict[int, LT],
+    neg_indices: dict[int, LT],
+    sample: LT,
+) -> tuple[dict[int, LT], dict[int, LT]]:
     sample_set = set(sample)
 
     def _compute(class_indices):
@@ -173,13 +166,14 @@ class FewShotMetaDataset(IterableMetaDataset):
     ) -> None:
         super().__init__()
         self.task_source = task_source
-        self.task_target = task_source.task_target
+        self.task_description = task_source.task_description
+        self.task_target = self.task_description.task_target
 
         self.pos_indices, self.neg_indices = get_indices(
-            self.task_source.labels, self.task_source.classes, self.task_target
+            self.task_source.labels, self.task_description.classes, self.task_target
         )
 
-        self.used_classes = list(self.task_source.classes.keys())
+        self.used_classes = list(self.task_description.classes.keys())
         if self.task_target is TaskTarget.BINARY_CLASSIFICATION:
             self.used_classes = [1]
         if filter_classes_min_samples > 0:
@@ -275,10 +269,12 @@ class FewShotMetaDataset(IterableMetaDataset):
                 support = self.collate_fn(support)
                 query = self.collate_fn(query)
                 class_dict = {
-                    ci: self.task_source.classes[c]
+                    ci: self.task_description.classes[c]
                     for ci, c in enumerate(self.used_classes)
                 }
-                yield Task(support, query, self.task_target, class_dict)
+                yield Task(
+                    support, query, TaskDescription(self.task_target, class_dict)
+                )
             except ValueError:
                 return
 
@@ -333,10 +329,12 @@ class FewShotMetaDataset(IterableMetaDataset):
                 support = self.collate_fn(support)
                 query = self.collate_fn(query)
                 class_dict = {
-                    ci: self.task_source.classes[c]
+                    ci: self.task_description.classes[c]
                     for ci, c in enumerate(self.used_classes)
                 }
-                yield Task(support, query, self.task_target, class_dict)
+                yield Task(
+                    support, query, TaskDescription(self.task_target, class_dict)
+                )
             except ValueError:
                 return
 
@@ -383,10 +381,12 @@ class FewShotMetaDataset(IterableMetaDataset):
                 support = self.collate_fn(support)
                 query = self.collate_fn(query)
                 class_dict = {
-                    0: self.task_source.classes[0],
-                    1: self.task_source.classes[1],
+                    0: self.task_description.classes[0],
+                    1: self.task_description.classes[1],
                 }
-                yield Task(support, query, self.task_target, class_dict)
+                yield Task(
+                    support, query, TaskDescription(self.task_target, class_dict)
+                )
 
             except ValueError:
                 return
