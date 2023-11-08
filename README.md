@@ -33,7 +33,7 @@ or few-shot learning experiments.
   convenient training and evaluation routines.
 - `torchcross.utils`: Contains various utility functions.
 
-**This library is still in beta. The API is potentially subject to change. Any feedback
+**This library is still in alpha. The API is potentially subject to change. Any feedback
 is welcome.**
 
 ## Installation
