@@ -40,6 +40,9 @@ class SimpleClassifier(
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
 
+        metric_keys = ["accuracy/{}", "AUROC/{}"]
+        self.configure_metrics(metric_keys)
+
         self.automatic_optimization = False
 
     def get_metrics_and_loss(
