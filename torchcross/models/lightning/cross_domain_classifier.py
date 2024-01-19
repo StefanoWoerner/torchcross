@@ -16,14 +16,16 @@ class SimpleCrossDomainClassifier(
 ):
     def __init__(
         self,
-        backbone: tuple[torch.nn.Module, int],
+        backbone: nn.Module,
+        num_backbone_features: int,
         optimizer: type[Optimizer],
         lr_scheduler: Callable[[Optimizer], Any] | None = None,
         task_descriptions: list[TaskDescription] = None,
         add_heads_during_training: bool = True,
     ):
         super().__init__(
-            *backbone,
+            backbone,
+            num_backbone_features,
             task_descriptions,
             add_heads_during_training,
         )

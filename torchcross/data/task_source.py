@@ -32,6 +32,70 @@ class TaskSource(Dataset, ABC):
     task_description: TaskDescription
     labels: np.ndarray | torch.Tensor | Sequence
 
+    def get_num_samples_per_class(
+        self, neg=False
+    ) -> np.ndarray | torch.Tensor | list[int]:
+        task_target = self.task_description.task_target
+        total = len(self.labels)
+
+        classes = self.task_description.classes
+        num_classes = len(classes)
+        max_class_key = max(classes.keys())
+
+        not_implemented_message = f"Task target {task_target} not yet implemented"
+
+        if isinstance(self.labels, np.ndarray):
+            if task_target is TaskTarget.MULTICLASS_CLASSIFICATION:
+                num_samples = np.bincount(self.labels, minlength=num_classes)
+            elif task_target is TaskTarget.MULTILABEL_CLASSIFICATION:
+                num_samples = np.sum(self.labels, axis=0)
+            elif task_target is TaskTarget.BINARY_CLASSIFICATION:
+                num_samples = np.sum(self.labels, axis=0)
+            elif task_target is TaskTarget.ORDINAL_REGRESSION:
+                num_samples = np.bincount(self.labels, minlength=max_class_key + 1)
+                num_samples = num_samples[np.array(list(classes.keys()), dtype=np.int_)]
+            else:
+                raise NotImplementedError(not_implemented_message)
+            return num_samples - total if neg else num_samples
+
+        elif isinstance(self.labels, torch.Tensor):
+            if task_target is TaskTarget.MULTICLASS_CLASSIFICATION:
+                num_samples = torch.bincount(self.labels, minlength=num_classes)
+            elif task_target is TaskTarget.MULTILABEL_CLASSIFICATION:
+                num_samples = torch.sum(self.labels, dim=0)
+            elif task_target is TaskTarget.BINARY_CLASSIFICATION:
+                num_samples = torch.sum(self.labels, dim=0)
+            elif task_target is TaskTarget.ORDINAL_REGRESSION:
+                num_samples = torch.bincount(self.labels, minlength=max_class_key + 1)
+                num_samples = num_samples[
+                    torch.tensor(
+                        list(classes.keys()),
+                        device=num_samples.device,
+                        dtype=torch.long,
+                    )
+                ]
+            else:
+                raise NotImplementedError(not_implemented_message)
+            return num_samples - total if neg else num_samples
+
+        elif isinstance(self.labels, Sequence):
+            if task_target is TaskTarget.MULTICLASS_CLASSIFICATION:
+                num_samples = [sum(l == c for l in self.labels) for c in classes]
+            elif task_target is TaskTarget.MULTILABEL_CLASSIFICATION:
+                num_samples = [sum(l[c] for l in self.labels) for c in classes]
+            elif task_target is TaskTarget.BINARY_CLASSIFICATION:
+                num_samples = [
+                    sum(l[0] if isinstance(l, Sequence) else l for l in self.labels)
+                ]
+            elif task_target is TaskTarget.ORDINAL_REGRESSION:
+                num_samples = [sum(l == c for l in self.labels) for c in classes]
+            else:
+                raise NotImplementedError(not_implemented_message)
+            return [n - total for n in num_samples] if neg else num_samples
+
+        else:
+            raise ValueError("Unsupported label data type")
+
 
 class WrapTaskSource(TaskSource):
     """Wraps a dataset as a task source."""

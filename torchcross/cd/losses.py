@@ -7,8 +7,11 @@ from torchcross.data.task import TaskTarget
 
 __all__ = ["get_loss_func"]
 
+
 def get_loss_func(
-    task_target: TaskTarget, classes: dict[int, str], device: torch.device = None
+    task_target: TaskTarget,
+    classes: dict[int, str],
+    device: torch.device = None,
 ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
     """Get the loss function for a given task target and classes.
 
@@ -24,9 +27,15 @@ def get_loss_func(
     """
     match task_target:
         case TaskTarget.MULTICLASS_CLASSIFICATION:
-            return F.cross_entropy
+            return lambda p, y, pos_class_weights=None: F.cross_entropy(
+                p, y, weight=pos_class_weights
+            )
         case TaskTarget.MULTILABEL_CLASSIFICATION | TaskTarget.BINARY_CLASSIFICATION:
-            return lambda p, y: F.binary_cross_entropy_with_logits(p, y.float())
+            return (
+                lambda p, y, pos_class_weights=None: F.binary_cross_entropy_with_logits(
+                    p, y.float(), pos_weight=pos_class_weights
+                )
+            )
         case TaskTarget.ORDINAL_REGRESSION:
             class_to_idx = torch.full(
                 (max(classes) + 1,),
@@ -36,7 +45,9 @@ def get_loss_func(
             )
             for i, c in enumerate(classes):
                 class_to_idx[c] = i
-            return lambda p, y: F.cross_entropy(p, class_to_idx[y])
+            return lambda p, y, pos_class_weights=None: F.cross_entropy(
+                p, class_to_idx[y], weight=pos_class_weights
+            )
         case TaskTarget.REGRESSION:
             return F.mse_loss
         case target:
@@ -57,9 +68,7 @@ def get_ordinal_cross_entropy_loss(classes):
 
         weightss = weights.unsqueeze(0).repeat(y.size(0), 1).to(p.device)
 
-        binary_losses = F.binary_cross_entropy_with_logits(
-            p, y_binary.float()
-        )
+        binary_losses = F.binary_cross_entropy_with_logits(p, y_binary.float())
         weighted_binary_losses = binary_losses * weightss
         ordinal_loss = weighted_binary_losses.mean()
         return ordinal_loss

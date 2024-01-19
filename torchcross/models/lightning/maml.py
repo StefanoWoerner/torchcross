@@ -3,7 +3,7 @@ from typing import Optional, Any
 
 import torch
 import torchopt
-from torch import Tensor
+from torch import Tensor, nn
 from torch.optim import Optimizer
 
 from .episodic import EpisodicLightningModule
@@ -17,7 +17,8 @@ from ...data import TaskDescription, Task
 class MAML(models.MAML, EpisodicLightningModule):
     def __init__(
         self,
-        backbone: tuple[torch.nn.Module, int],
+        backbone: nn.Module,
+        num_backbone_features: int,
         task_description: TaskDescription,
         outer_optimizer: Callable[
             [Iterable[Tensor] | Iterable[dict[str, Any]]], torch.optim.Optimizer
@@ -33,7 +34,8 @@ class MAML(models.MAML, EpisodicLightningModule):
         outer_lr_scheduler: Callable[[Optimizer], Any] | None = None,
     ) -> None:
         super(MAML, self).__init__(
-            *backbone,
+            backbone,
+            num_backbone_features,
             task_description,
             inner_optimizer,
             eval_inner_optimizer,
@@ -104,7 +106,8 @@ class MAML(models.MAML, EpisodicLightningModule):
 class CrossDomainMAML(models.CrossDomainMAML, EpisodicLightningModule):
     def __init__(
         self,
-        backbone: tuple[torch.nn.Module, int],
+        backbone: nn.Module,
+        num_backbone_features: int,
         outer_optimizer: Callable[
             [Iterable[Tensor] | Iterable[dict[str, Any]]], torch.optim.Optimizer
         ],
@@ -119,7 +122,8 @@ class CrossDomainMAML(models.CrossDomainMAML, EpisodicLightningModule):
         outer_lr_scheduler: Callable[[Optimizer], Any] | None = None,
     ) -> None:
         super(CrossDomainMAML, self).__init__(
-            *backbone,
+            backbone,
+            num_backbone_features,
             inner_optimizer,
             eval_inner_optimizer,
             num_inner_steps,

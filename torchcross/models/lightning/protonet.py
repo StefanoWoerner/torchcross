@@ -2,7 +2,7 @@ from collections.abc import Callable, Sequence, Iterable
 from typing import Any, Literal
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from torch.optim import Optimizer
 
 from .episodic import EpisodicLightningModule
@@ -16,7 +16,8 @@ from ...data import Task
 class ProtoNet(models.ProtoNet, EpisodicLightningModule):
     def __init__(
         self,
-        backbone: tuple[torch.nn.Module, int],
+        backbone: nn.Module,
+        num_backbone_features: int,
         outer_optimizer: Callable[
             [Iterable[Tensor] | Iterable[dict[str, Any]]], torch.optim.Optimizer
         ],
@@ -26,7 +27,8 @@ class ProtoNet(models.ProtoNet, EpisodicLightningModule):
         outer_lr_scheduler: Callable[[Optimizer], Any] | None = None,
     ) -> None:
         super(ProtoNet, self).__init__(
-            *backbone,
+            backbone,
+            num_backbone_features,
             distance=distance,
         )
 

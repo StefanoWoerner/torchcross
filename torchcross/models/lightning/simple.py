@@ -2,7 +2,7 @@ from typing import Callable, Any
 
 import torch
 from lightning import pytorch as pl
-from torch import Tensor
+from torch import Tensor, nn
 from torch.optim import Optimizer
 
 from torchcross import models
@@ -18,16 +18,23 @@ class SimpleClassifier(
 ):
     def __init__(
         self,
-        backbone: tuple[torch.nn.Module, int],
+        backbone: nn.Module,
+        num_backbone_features: int,
         task_description: TaskDescription,
         optimizer: type[Optimizer],
         lr_scheduler: Callable[[Optimizer], Any] | None = None,
         expand_input_channels: bool = True,
+        pos_class_weights: torch.Tensor = None,
     ) -> None:
-        super().__init__(*backbone, task_description, expand_input_channels)
+        super().__init__(
+            backbone, num_backbone_features, task_description, expand_input_channels
+        )
 
+        self.register_buffer("pos_class_weights", pos_class_weights)
         self.loss_func = get_loss_func(
-            task_description.task_target, task_description.classes, self.device
+            task_description.task_target,
+            task_description.classes,
+            self.device,
         )
         self.pred_func = get_prob_func(task_description.task_target)
         self.accuracy_func = get_accuracy_func(
@@ -51,7 +58,7 @@ class SimpleClassifier(
     ) -> tuple[tuple[Tensor, ...], Tensor]:
         x, y = batch
         logits = self.forward(x)
-        loss = self.loss_func(logits, y)
+        loss = self.loss_func(logits, y, self.pos_class_weights)
         pred = self.pred_func(logits)
         return self.compute_metrics(pred, y), loss
 
