@@ -55,15 +55,7 @@ class CrossDomainLightningModule(
         batch: tuple[tuple[torch.Tensor, torch.Tensor], TaskDescription],
         batch_idx: int,
     ):
-        try:
-            metric_values, loss = self.get_metrics_and_loss(batch)
-        except RuntimeError:
-            print(batch[1].task_identifier)
-            print(batch[1].task_target)
-            print(batch[1].classes)
-            print(batch[0][1].shape)
-            print(batch[0][1].cpu().numpy())
-            raise
+        metric_values, loss = self.get_metrics_and_loss(batch)
 
         self.update_metrics("val", metric_values)
 
