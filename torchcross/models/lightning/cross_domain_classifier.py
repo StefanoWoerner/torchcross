@@ -1,12 +1,14 @@
 import logging
-from typing import Callable, Any
+from typing import Callable, Any, Literal
 
 import torch
 from torch import nn
 from torch.optim import Optimizer
+from torchmetrics import MetricCollection
 
 from torchcross import models
-from torchcross.cd.metrics import get_accuracy_func, get_auroc_func
+from torchcross.cd.metrics import Accuracy, AUROC
+from torchcross.cd.metrics.wrappers import CrossDomainMeanWrapper
 from torchcross.data.task import TaskDescription
 from torchcross.models.lightning.cross_domain import CrossDomainLightningModule
 
@@ -22,6 +24,7 @@ class SimpleCrossDomainClassifier(
         lr_scheduler: Callable[[Optimizer], Any] | None = None,
         task_descriptions: list[TaskDescription] = None,
         add_heads_during_training: bool = True,
+        scale_loss_by_batch_count: bool = False,
     ):
         super().__init__(
             backbone,
@@ -33,24 +36,39 @@ class SimpleCrossDomainClassifier(
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
 
-        metric_keys = ["accuracy/{}", "AUROC/{}"]
-        self.configure_metrics(metric_keys)
+        self.scale_loss_by_batch_count = scale_loss_by_batch_count
+
+        self.training_metrics = MetricCollection(
+            {
+                "accuracy": CrossDomainMeanWrapper(Accuracy, task_descriptions),
+                "AUROC": CrossDomainMeanWrapper(AUROC, task_descriptions),
+            },
+            postfix="/train",
+        )
+        self.validation_metrics = self.training_metrics.clone(postfix="/val")
+        self.test_metrics = self.training_metrics.clone(postfix="/test")
 
     def add_head(self, task_description: TaskDescription) -> nn.Module:
         new_head = super().add_head(task_description)
         self.optimizers().add_param_group({"params": new_head.parameters()})
         return new_head
 
-    def compute_metrics(self, task_description, pred, y):
-        accuracy_func = get_accuracy_func(
-            task_description.task_target, task_description.classes, self.device
-        )
-        auroc_func = get_auroc_func(
-            task_description.task_target, task_description.classes, self.device
-        )
-        accuracy = accuracy_func(pred, y)
-        auroc = auroc_func(pred, y)
-        return accuracy, auroc
+    def call_metrics(
+        self,
+        mode: Literal["train", "val", "test"],
+        task_description: TaskDescription,
+        pred: torch.Tensor,
+        y: torch.Tensor,
+    ):
+        if mode == "train":
+            metrics = self.training_metrics
+        elif mode == "val":
+            metrics = self.validation_metrics
+        elif mode == "test":
+            metrics = self.test_metrics
+        else:
+            raise ValueError(f"Invalid mode {mode}")
+        return metrics(task_description, pred, y)
 
     def validation_step(
         self,

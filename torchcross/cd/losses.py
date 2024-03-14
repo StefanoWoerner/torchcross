@@ -1,9 +1,10 @@
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch.nn.functional as F
+from torch import nn
 
-from torchcross.data.task import TaskTarget
+from torchcross.data.task import TaskTarget, TaskDescription
 
 __all__ = ["get_loss_func"]
 
@@ -50,6 +51,59 @@ def get_loss_func(
             )
         case TaskTarget.REGRESSION:
             return F.mse_loss
+        case target:
+            raise NotImplementedError(f"Unsupported task target: {target}")
+
+
+class IndexedCrossEntropyLoss(nn.CrossEntropyLoss):
+    def __init__(
+        self,
+        classes: dict[int, str],
+        weight: Optional[torch.Tensor] = None,
+        size_average=None,
+        ignore_index: int = -100,
+        reduce=None,
+        reduction: str = "mean",
+        label_smoothing: float = 0.0,
+    ) -> None:
+        super().__init__(
+            weight, size_average, ignore_index, reduce, reduction, label_smoothing
+        )
+
+        self.register_buffer(
+            "class_to_idx", torch.full((max(classes) + 1,), -1, dtype=torch.long)
+        )
+        for i, c in enumerate(classes):
+            self.class_to_idx[c] = i
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return super().forward(input, self.class_to_idx[target])
+
+
+class FloatBCEWithLogitsLoss(nn.BCEWithLogitsLoss):
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return super().forward(input, target.float())
+
+
+def get_criterion(
+    task_description: TaskDescription,
+    pos_class_weights: torch.Tensor = None,
+    device: torch.device = None,
+    **criterion_kwargs,
+):
+    match task_description.task_target:
+        case TaskTarget.MULTICLASS_CLASSIFICATION:
+            return nn.CrossEntropyLoss(weight=pos_class_weights, **criterion_kwargs)
+        case TaskTarget.MULTILABEL_CLASSIFICATION | TaskTarget.BINARY_CLASSIFICATION:
+            return FloatBCEWithLogitsLoss(
+                pos_weight=pos_class_weights, **criterion_kwargs
+            )
+        case TaskTarget.ORDINAL_REGRESSION:
+            return IndexedCrossEntropyLoss(
+                task_description.classes, weight=pos_class_weights, **criterion_kwargs
+            ).to(device)
+        case TaskTarget.REGRESSION:
+            return nn.MSELoss(**criterion_kwargs)
         case target:
             raise NotImplementedError(f"Unsupported task target: {target}")
 

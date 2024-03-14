@@ -3,7 +3,7 @@ from typing import Literal
 import torch
 import torchmetrics
 from torch import Tensor
-import pytorch_lightning as pl
+from lightning import pytorch as pl
 
 
 class MeanMetricsMixin(pl.LightningModule):
@@ -16,15 +16,15 @@ class MeanMetricsMixin(pl.LightningModule):
 
     def configure_metrics(self, metric_keys: list[str]) -> None:
         self.metric_keys = metric_keys
-        self.training_metrics = torch.nn.ModuleDict({
-            k.format("train"): torchmetrics.MeanMetric() for k in self.metric_keys
-        })
-        self.validation_metrics = torch.nn.ModuleDict({
-            k.format("val"): torchmetrics.MeanMetric() for k in self.metric_keys
-        })
-        self.test_metrics = torch.nn.ModuleDict({
-            k.format("test"): torchmetrics.MeanMetric() for k in self.metric_keys
-        })
+        self.training_metrics = torch.nn.ModuleDict(
+            {k.format("train"): torchmetrics.MeanMetric() for k in self.metric_keys}
+        )
+        self.validation_metrics = torch.nn.ModuleDict(
+            {k.format("val"): torchmetrics.MeanMetric() for k in self.metric_keys}
+        )
+        self.test_metrics = torch.nn.ModuleDict(
+            {k.format("test"): torchmetrics.MeanMetric() for k in self.metric_keys}
+        )
 
     def update_metrics(
         self,
