@@ -127,7 +127,7 @@ class WrapTaskSource(TaskSource):
         return len(self.dataset)
 
 
-class BatchedTaskSource(TaskSource, IterableDataset):
+class BatchedTaskSource(IterableDataset):
     def __init__(
         self,
         task_source: TaskSource,
