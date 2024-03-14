@@ -24,12 +24,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "numpy~=1.24.3",
-    "torch~=2.0.0",
-    "lightning~=2.0.2",
-    "torchmetrics~=0.11.4",
-    "omegaconf~=2.3.0",
-    "torchopt~=0.7.1",
+    "numpy>=1.24.3",
+    "torch>=2.0.0",
+    "lightning>=2.0.2",
+    "torchmetrics>=1.2.0",
+    "omegaconf>=2.3.0",
+    "torchopt>=0.7.1",
 ]
 
 [project.urls]
